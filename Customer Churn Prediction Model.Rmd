@@ -1,0 +1,131 @@
+---
+title: "Customer Churn Prediction Project"
+author: "Njiraini Brian (JKUAT)"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+#Project: 1
+#Below is a step-by-step implementation of the **Customer Churn Prediction Project** using the **Telco Customer Churn dataset** with **R-code**. This project includes data cleaning, exploratory analysis, modelling and visualizatiion.
+
+#Step 1: Download the dataset
+#Download the dataset from Kaggle: [Telco Customer Churn](https://www.kaggle.com/blastchar/telco-customer-churn)
+#Save the CSV file ('WA_Fn-UseC_-Telco-Customer-Churn.csv') to your working directorate
+
+#Step 2: Set up R Environment
+#Installl packages
+install.packages("tidyverse")
+install.packages("caret")
+install.packages("randomForest")
+install.packages("pROC")
+install.packages("ggpplot2")
+install.packages("ggcorrplot")
+install.packages("rpart")
+install.packages("rpart.plot")
+
+#Load Libraries
+library(tidyverse)
+library(caret)
+library(randomForest)
+library(pROC)
+library(ggplot2)
+library(ggcorrplot)
+library(rpart)
+library(rpart.plot)
+
+#Load and Clean the data
+#Load data
+library(readr)
+data <- read_csv("Code Training/WA_Fn-UseC_-Telco-Customer-Churn.csv")
+view(data)
+
+#Check Structure
+str(data)
+
+#Convert "TotalCharges" to numeric and handle missing values (if any)
+data$TotalCharges <- as.numeric(data$TotalCharges)
+data<- data[!is.na(data$TotalCharges),]
+
+#Convert "Churn" to binary (1= "Yes", 0= "No")
+data$Churn <- ifelse(data$Churn == "Yes", 0,1)
+
+#Drop irrelevant colimns (Customer ID)
+data <- data%>%select(-customerID)
+
+#Convert categorical variables to factors
+categorical_cols <- c("gender", "Partner", "Dependents","MultipleLines", "InternetService", "OnlineSecurity", "OnlineBackup", "DeviceProtection", "TechSupport", "StreamingTV", "StreamingMovies", "Contract", "PaperlessBilling", "PaymentMethod")
+data[categorical_cols] <- lapply(data[categorical_cols], factor)
+
+#Check for missing values
+sum(is.na(data))
+
+#Step 4: Exploratory Data Analysis (EDA)
+#Plot Churn Disribution
+ggplot(data,aes(x=factor(Churn), fill=factor(Churn))) + geom_bar () + labs(title="Churn Distribution", x= "Churn", y="Count") + scale_fill_manual(values = c("Skyblue", "salmon"))
+
+#Analyze churn by tenure
+ggplot(data, aes(x=tenure, fill=factor(Churn))) + geom_histogram(binwidth=5, position ="dodge") + labs(title="Churn by Tenure", x= "Tenure(Months)", y="Count")
+
+#Analyze churn by contract type
+ggplot(data, aes(x=Contract, fill=factor(Churn))) + geom_bar(position= "fill") +labs(title= "Churn by Contract Type", y="Proportipon")
+#Correlation Matrix (Numeric Variables)
+numeric_data <- data%>%select(tenure, MonthlyCharges, TotalCharges, Churn)
+cor_matrix <- cor(numeric_data)
+ggcorrplot(cor_matrix, lab=TRUE, title = "Correlation Matrix")
+
+#Step 5: Feature Engeineering
+#Create a new feature: tenure group (e.g., 0-12 months, 13-24 months, etc.)
+data$TenureGroup <- cut(data$tenure, breaks =c(0,12,24,36,48,60,72), labels=c("0-12","13-24","25-36","37-48","49-60","61-72"))
+
+#Convert to factor
+data$TenureGroup <- as.factor(data$TenureGroup)
+
+#Step 6: Split data into Training and Testing Sets
+set.seed(123)
+split <- createDataPartition(data$Churn, p=0.8, list = FALSE)
+train_data <- data[split,]
+test_data <- data[-split,]
+
+#Step 7: Build Predictive Models
+logit_model <- glm(Churn ~., data=train_data, family="binomial")
+summary(logit_model)
+
+#Predict on test data
+logit_pred <- predict(logit_model, test_data, type ="response")
+logit_pred_class <- ifelse(logit_pred > 0.5,1,0)
+
+#Evalaute performance
+confusionMatrix(factor(logit_pred_class), factor(test_data$Churn))
+
+#Random Forest
+rf_model <- randomForest(factor(Churn)~., data=train_data,ntree = 100)
+rf_pred <- predict(rf_model, test_data)
+
+#Evaluate performance
+confusionMatrix(rf_pred, factor(test_data$Churn))
+
+#Feature Importance
+importance<- importance(rf_model)
+varImpPlot(rf_model, main = "Random Forest Feature Importance")
+
+#Step 8: Model Evaluation
+#ROC curve for logistric regression
+roc_logit <- roc(test_data$Churn, logit_pred)
+plot(roc_logit,col="blue", main="ROC Curve (Logistic Regression)')
+auc(roc_logit)
+
+#ROC curve for random Forest
+rf_prob <- predict(rf_model, test_data, type ="prob")[,2]
+roc_rf <- roc(test_data$Churn, rf_prob)
+plot(roc_rf, cpl="red", main ="ROC Curve (Random Forest)")
+auc(roc_rf)
+
+#Step 9: Interprate Results
+#Key drivers of Churn
+importance_df <- data.frame(Feature = rownames(importance),Importance = importance[,1])
+importance_df <- importance_df[order(-importance_df$Importance),]
+ggplot(importance_df[1:10,],aes(x=reorder(Feature, Importance), y= Importance)) + geom_bar(stat= "identity", fill = "steelblue") + coord_flip() + labs(title = "Top 10 Features Influencing Churn", x= "Feature", y= "Importance")
